@@ -1,0 +1,13 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+
+# Pesos de modelos (ultralytics los descarga solos; los propios van fuera de git)
+*.pt
+*.onnx
+
+# Entorno local
+.env
