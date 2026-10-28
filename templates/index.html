@@ -1,0 +1,552 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Vigilante de Inocuidad BPM</title>
+  <meta name="description" content="Deteccion en tiempo real de EPP y violaciones BPM con YOLOv8."/>
+  <link rel="preconnect" href="https://fonts.googleapis.com"/>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet"/>
+  <style>
+    :root {
+      --bg:      #050709;
+      --s1:      #0d1117;
+      --s2:      #161b22;
+      --border:  rgba(255,255,255,.07);
+      --border2: rgba(255,255,255,.13);
+      --accent:  #3b82f6;
+      --green:   #10b981;
+      --amber:   #f59e0b;
+      --red:     #ef4444;
+      --muted:   #7d8590;
+      --text:    #e6edf3;
+      --r:       10px;
+    }
+    *,*::before,*::after{box-sizing:border-box;margin:0;padding:0;}
+    html{scroll-behavior:smooth;}
+    body{
+      font-family:'Inter',sans-serif;
+      background:var(--bg);color:var(--text);
+      min-height:100vh;
+      display:grid;
+      grid-template-rows:56px 1fr 40px;
+      overflow:hidden;
+    }
+    body::before{
+      content:'';position:fixed;inset:0;z-index:0;pointer-events:none;
+      background:
+        radial-gradient(ellipse 70% 50% at 10% 0%,rgba(59,130,246,.07) 0%,transparent 55%),
+        radial-gradient(ellipse 50% 60% at 90% 100%,rgba(139,92,246,.06) 0%,transparent 55%);
+    }
+
+    /* ── HEADER ─────────────────────────────────────── */
+    header{
+      position:relative;z-index:10;
+      display:flex;align-items:center;justify-content:space-between;
+      padding:0 20px;border-bottom:1px solid var(--border);
+      background:rgba(13,17,23,.92);backdrop-filter:blur(12px);
+    }
+    .brand{display:flex;align-items:center;gap:10px;font-weight:700;font-size:14px;}
+    .brand-icon{
+      width:28px;height:28px;border-radius:7px;
+      background:linear-gradient(135deg,#3b82f6,#8b5cf6);
+      display:flex;align-items:center;justify-content:center;font-size:14px;
+    }
+    .brand-sub{font-size:10px;font-weight:400;color:var(--muted);display:block;margin-top:1px;}
+    .hdr-right{display:flex;align-items:center;gap:12px;}
+    #model-badge{
+      font-size:11px;font-weight:700;padding:4px 11px;border-radius:999px;
+      border:1px solid;transition:all .3s;display:flex;align-items:center;gap:6px;
+    }
+    #model-badge.custom{color:var(--green);background:rgba(16,185,129,.1);border-color:rgba(16,185,129,.3);}
+    #model-badge.ppe   {color:#60a5fa;background:rgba(96,165,250,.1);border-color:rgba(96,165,250,.3);}
+    #model-badge.coco  {color:var(--amber);background:rgba(245,158,11,.1);border-color:rgba(245,158,11,.3);}
+    #model-badge.demo  {color:var(--muted);background:rgba(125,133,144,.08);border-color:rgba(125,133,144,.2);}
+    #cam-pill{
+      display:flex;align-items:center;gap:6px;
+      font-size:12px;font-weight:500;color:var(--muted);
+    }
+    .sdot{width:8px;height:8px;border-radius:50%;background:var(--muted);transition:.4s;}
+    .sdot.on{background:var(--green);animation:pg 2s ease infinite;}
+    .sdot.off{background:var(--red);}
+
+    /* ── LAYOUT ──────────────────────────────────────── */
+    main{
+      position:relative;z-index:1;
+      display:grid;
+      grid-template-columns:1fr 340px;
+      overflow:hidden;
+    }
+
+    /* ── VIDEO ───────────────────────────────────────── */
+    .video-panel{
+      position:relative;background:#000;
+      display:flex;align-items:center;justify-content:center;overflow:hidden;
+    }
+    #stream{width:100%;height:100%;object-fit:contain;display:block;}
+    .corner{
+      position:absolute;width:22px;height:22px;
+      border-color:rgba(59,130,246,.55);border-style:solid;pointer-events:none;
+    }
+    .corner.tl{top:12px;left:12px;border-width:2px 0 0 2px;}
+    .corner.tr{top:12px;right:12px;border-width:2px 2px 0 0;}
+    .corner.bl{bottom:12px;left:12px;border-width:0 0 2px 2px;}
+    .corner.br{bottom:12px;right:12px;border-width:0 2px 2px 0;}
+    .rec-badge{
+      position:absolute;top:14px;left:50%;transform:translateX(-50%);
+      display:flex;align-items:center;gap:5px;
+      font-size:11px;font-weight:700;letter-spacing:.12em;
+      background:rgba(239,68,68,.82);color:#fff;
+      padding:3px 10px;border-radius:999px;backdrop-filter:blur(8px);
+    }
+    .rdot{width:6px;height:6px;border-radius:50%;background:#fff;animation:blink 1.2s ease infinite;}
+    .offline-ov{
+      position:absolute;inset:0;display:none;
+      flex-direction:column;align-items:center;justify-content:center;gap:10px;
+      background:rgba(5,7,9,.85);backdrop-filter:blur(10px);
+      color:var(--muted);font-size:14px;
+    }
+    .offline-ov.show{display:flex;}
+
+    /* ── SIDEBAR ─────────────────────────────────────── */
+    .sidebar{
+      background:var(--s1);border-left:1px solid var(--border);
+      display:flex;flex-direction:column;overflow:hidden;
+    }
+    .sec{padding:14px 16px;border-bottom:1px solid var(--border);}
+    .sec:last-child{border-bottom:none;flex:1;overflow-y:auto;}
+    .sec-title{
+      font-size:10px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;
+      color:var(--muted);margin-bottom:10px;
+    }
+
+    /* Stats */
+    .stats-grid{display:grid;grid-template-columns:1fr 1fr;gap:7px;}
+    .stat-card{
+      background:var(--s2);border:1px solid var(--border);border-radius:var(--r);
+      padding:9px 11px;
+    }
+    .stat-lbl{font-size:9px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin-bottom:3px;}
+    .stat-val{font-family:'Space Mono',monospace;font-size:20px;font-weight:700;line-height:1;}
+    .stat-val.r{color:var(--red);}
+    .stat-val.g{color:var(--green);}
+    .stat-val.a{color:var(--amber);}
+
+    /* ── EPP CHECKLIST ────────────────────────────────── */
+    .epp-list{display:flex;flex-direction:column;gap:6px;}
+    .epp-item{
+      background:var(--s2);border:1px solid var(--border);border-radius:var(--r);
+      padding:9px 12px;display:flex;align-items:center;justify-content:space-between;
+      transition:border-color .3s,background .3s;
+    }
+    .epp-item.ok     {border-color:rgba(16,185,129,.3);background:rgba(16,185,129,.04);}
+    .epp-item.danger {border-color:rgba(239,68,68,.4); background:rgba(239,68,68,.06);animation:pulse-r .8s ease infinite;}
+    .epp-item.unknown{border-color:rgba(125,133,144,.15);}
+    .epp-name{font-size:12px;font-weight:600;color:var(--text);}
+    .epp-name small{display:block;font-size:10px;font-weight:400;color:var(--muted);margin-top:1px;}
+    .epp-chip{
+      font-size:10px;font-weight:700;letter-spacing:.07em;text-transform:uppercase;
+      padding:2px 8px;border-radius:999px;border:1px solid;white-space:nowrap;
+    }
+    .epp-chip.ok     {color:var(--green);background:rgba(16,185,129,.12);border-color:rgba(16,185,129,.3);}
+    .epp-chip.danger {color:var(--red);  background:rgba(239,68,68,.12); border-color:rgba(239,68,68,.35);}
+    .epp-chip.unknown{color:var(--muted);background:rgba(125,133,144,.07);border-color:rgba(125,133,144,.2);}
+
+    /* ── DETECTIONS ──────────────────────────────────── */
+    .det-list{display:flex;flex-direction:column;gap:6px;}
+    .det-item{
+      background:var(--s2);border:1px solid var(--border);border-radius:var(--r);
+      padding:8px 12px;animation:slideIn .2s ease;
+    }
+    .det-top{display:flex;align-items:center;justify-content:space-between;}
+    .det-name{font-size:13px;font-weight:600;}
+    .det-badge{
+      font-size:10px;font-weight:700;letter-spacing:.07em;text-transform:uppercase;
+      padding:2px 7px;border-radius:999px;border:1px solid;
+    }
+    .det-badge.person       {color:#60a5fa;background:rgba(96,165,250,.1);border-color:rgba(96,165,250,.3);}
+    .det-badge.epp_ok       {color:var(--green);background:rgba(16,185,129,.1);border-color:rgba(16,185,129,.3);}
+    .det-badge.epp_violation{color:var(--red);background:rgba(239,68,68,.1);border-color:rgba(239,68,68,.3);}
+    .det-badge.hygiene      {color:var(--amber);background:rgba(245,158,11,.1);border-color:rgba(245,158,11,.3);}
+    .det-badge.object       {color:var(--muted);background:rgba(125,133,144,.07);border-color:rgba(125,133,144,.2);}
+    .conf-row{display:flex;align-items:center;gap:8px;margin-top:5px;}
+    .conf-bar-w{flex:1;height:4px;border-radius:999px;background:rgba(255,255,255,.07);overflow:hidden;}
+    .conf-bar{height:100%;border-radius:999px;transition:width .3s;}
+    .conf-bar.person       {background:#60a5fa;}
+    .conf-bar.epp_ok       {background:var(--green);}
+    .conf-bar.epp_violation{background:var(--red);}
+    .conf-bar.hygiene      {background:var(--amber);}
+    .conf-bar.object       {background:var(--muted);}
+    .conf-lbl{font-family:'Space Mono',monospace;font-size:10px;color:var(--muted);}
+
+    /* Controls */
+    .ctrl-row{display:flex;gap:7px;flex-wrap:wrap;}
+    .btn{
+      flex:1;display:inline-flex;align-items:center;justify-content:center;gap:6px;
+      font-family:'Inter',sans-serif;font-size:12px;font-weight:600;
+      padding:9px 12px;border-radius:var(--r);border:1px solid var(--border);
+      cursor:pointer;transition:all .18s;background:transparent;color:var(--text);
+    }
+    .btn:hover{background:rgba(255,255,255,.06);border-color:var(--border2);transform:translateY(-1px);}
+    .btn:active{transform:scale(.97);}
+
+    /* ── FOOTER ──────────────────────────────────────── */
+    footer{
+      position:relative;z-index:10;height:40px;
+      display:flex;align-items:center;justify-content:space-between;
+      padding:0 20px;border-top:1px solid var(--border);
+      background:rgba(13,17,23,.92);backdrop-filter:blur(12px);
+      font-size:11px;color:var(--muted);
+    }
+    footer code{
+      font-family:'Space Mono',monospace;font-size:10px;
+      background:rgba(255,255,255,.05);padding:2px 7px;border-radius:5px;
+    }
+
+    /* ── ALERT BANNER ────────────────────────────────── */
+    #alert-banner{
+      position:fixed;top:62px;left:50%;transform:translateX(-50%);
+      z-index:999;display:none;
+      background:linear-gradient(90deg,rgba(239,68,68,.95),rgba(185,28,28,.95));
+      color:#fff;font-size:13px;font-weight:700;
+      padding:10px 24px;border-radius:var(--r);
+      box-shadow:0 4px 30px rgba(239,68,68,.5);
+      letter-spacing:.04em;backdrop-filter:blur(8px);
+      animation:bannerIn .3s ease;
+    }
+    #alert-banner.show{display:block;}
+
+    /* ── EMPTY ───────────────────────────────────────── */
+    .empty{text-align:center;padding:24px 12px;color:var(--muted);font-size:12px;}
+    .empty-icon{font-size:28px;margin-bottom:6px;opacity:.55;}
+
+    /* ── ANIMATIONS ──────────────────────────────────── */
+    @keyframes blink   {0%,100%{opacity:1}50%{opacity:.2}}
+    @keyframes pg      {0%,100%{box-shadow:0 0 0 0 rgba(16,185,129,.5)}60%{box-shadow:0 0 0 5px transparent}}
+    @keyframes pulse-r {0%,100%{box-shadow:none}50%{box-shadow:0 0 0 3px rgba(239,68,68,.25)}}
+    @keyframes slideIn {from{opacity:0;transform:translateY(-5px)}to{opacity:1;transform:translateY(0)}}
+    @keyframes bannerIn{from{opacity:0;transform:translateX(-50%) translateY(-8px)}to{opacity:1;transform:translateX(-50%) translateY(0)}}
+
+    /* ── RESPONSIVE ──────────────────────────────────── */
+    @media(max-width:900px){
+      main{grid-template-columns:1fr;grid-template-rows:1fr auto;}
+      .sidebar{max-height:300px;border-left:none;border-top:1px solid var(--border);}
+    }
+  </style>
+</head>
+<body>
+
+<div id="alert-banner"></div>
+
+<!-- HEADER -->
+<header>
+  <div class="brand">
+    <div class="brand-icon">🛡</div>
+    <div>Vigilante de Inocuidad
+      <span class="brand-sub">BPM Vision Engine · YOLOv8</span>
+    </div>
+  </div>
+  <div class="hdr-right">
+    <div id="model-badge" class="demo">
+      <span>●</span><span id="model-lbl">Iniciando...</span>
+    </div>
+    <div id="cam-pill">
+      <div class="sdot" id="sdot"></div>
+      <span id="cam-lbl">Conectando</span>
+    </div>
+  </div>
+</header>
+
+<!-- MAIN -->
+<main>
+
+  <!-- VIDEO -->
+  <div class="video-panel" id="vp">
+    <img id="stream" src="/video_feed" alt="Stream bioseguridad"
+         onerror="streamOff()" onload="streamOn()"/>
+    <div class="corner tl"></div><div class="corner tr"></div>
+    <div class="corner bl"></div><div class="corner br"></div>
+    <div class="rec-badge" id="rec"><div class="rdot"></div>REC</div>
+    <div class="offline-ov" id="offline-ov">
+      <div style="font-size:40px">📡</div>
+      <strong>Sin señal de video</strong>
+      <small>Verifica que el servidor esté activo</small>
+    </div>
+  </div>
+
+  <!-- SIDEBAR -->
+  <aside class="sidebar">
+
+    <!-- Stats -->
+    <div class="sec">
+      <div class="sec-title">Indicadores</div>
+      <div class="stats-grid">
+        <div class="stat-card">
+          <div class="stat-lbl">Alertas</div>
+          <div class="stat-val r" id="s-alerts">0</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-lbl">Uptime</div>
+          <div class="stat-val g" id="s-uptime">00:00:00</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-lbl">Personas</div>
+          <div class="stat-val" id="s-persons">0</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-lbl">Objetos</div>
+          <div class="stat-val" id="s-objs">0</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- EPP Checklist -->
+    <div class="sec" id="epp-sec">
+      <div class="sec-title">Estado EPP por Persona</div>
+      <div class="epp-list" id="epp-list">
+        <div class="empty"><div class="empty-icon">👤</div>Sin personas detectadas</div>
+      </div>
+    </div>
+
+    <!-- Controles -->
+    <div class="sec">
+      <div class="sec-title">Controles</div>
+      <div class="ctrl-row">
+        <button class="btn" onclick="snap()">📸 Captura</button>
+        <button class="btn" onclick="fullscr()">⛶ Full</button>
+      </div>
+    </div>
+
+    <!-- Objetos detectados -->
+    <div class="sec">
+      <div class="sec-title">
+        Objetos en Frame
+        <span id="det-cnt" style="margin-left:6px;color:var(--accent);font-size:11px;"></span>
+      </div>
+      <div class="det-list" id="det-list">
+        <div class="empty"><div class="empty-icon">🔍</div>Esperando detecciones</div>
+      </div>
+    </div>
+
+  </aside>
+</main>
+
+<!-- FOOTER -->
+<footer>
+  <span>Stream: <code>localhost:5000/video_feed</code></span>
+  <span id="ft-time">—</span>
+</footer>
+
+<script>
+// ── CONFIG ──────────────────────────────────────────────────────────
+  const PPE_ITEMS_PPE_MODE = [
+    { key:"no_mask",    label:"Cubrebocas",         ok_key:"mask" },
+    { key:"no_helmet",  label:"Casco/Cofia",        ok_key:"helmet" },
+    { key:"no_goggles", label:"Gafas de seguridad", ok_key:"goggles" },
+    { key:"no_glove",   label:"Guantes",            ok_key:"glove" },
+  ];
+  const PPE_NOT_DETECTABLE = [
+    "Chaleco de seguridad",
+  ];
+
+const CAT_LABEL = {
+  person:"Persona", epp_ok:"EPP OK", epp_violation:"Sin EPP",
+  hygiene:"Higiene", object:"Objeto",
+};
+
+// ── UPTIME ────────────────────────────────────────────────────────────
+const t0 = Date.now();
+function tick() {
+  const s = Math.floor((Date.now()-t0)/1000);
+  const h = String(Math.floor(s/3600)).padStart(2,'0');
+  const m = String(Math.floor((s%3600)/60)).padStart(2,'0');
+  const ss = String(s%60).padStart(2,'0');
+  document.getElementById('s-uptime').textContent = `${h}:${m}:${ss}`;
+  document.getElementById('ft-time').textContent  = new Date().toLocaleTimeString('es-MX');
+}
+setInterval(tick, 1000);
+
+// ── STREAM ────────────────────────────────────────────────────────────
+function streamOn(){
+  document.getElementById('sdot').className = 'sdot on';
+  document.getElementById('cam-lbl').textContent = 'En linea';
+  document.getElementById('rec').style.display = 'flex';
+  document.getElementById('offline-ov').classList.remove('show');
+}
+function streamOff(){
+  document.getElementById('sdot').className = 'sdot off';
+  document.getElementById('cam-lbl').textContent = 'Sin senal';
+  document.getElementById('rec').style.display = 'none';
+  document.getElementById('offline-ov').classList.add('show');
+}
+
+// ── STATUS ────────────────────────────────────────────────────────────
+let currentMode = 'demo';
+async function pollStatus() {
+  try {
+    const d = await (await fetch('/api/status')).json();
+    currentMode = d.model_status;
+    const badge = document.getElementById('model-badge');
+    const lbl   = document.getElementById('model-lbl');
+    const camLbl = document.getElementById('cam-lbl');
+    const MAP = {
+      custom:'Modelo BPM Custom', ppe:'PPE Detector (HuggingFace)',
+      coco:'YOLOv8n COCO', demo:'Sin Modelo',
+    };
+    badge.className = d.model_status;
+    lbl.textContent = MAP[d.model_status] || d.model_status;
+    if (d.capture_status === 'no_camera') {
+      camLbl.textContent = 'Sin camara';
+    } else if (d.capture_status && d.capture_status.startsWith('opened:')) {
+      camLbl.textContent = `Camara ${d.capture_status.split(':')[1]}`;
+    }
+  } catch(_){}
+}
+
+// ── DETECCIONES ───────────────────────────────────────────────────────
+async function pollDetections() {
+  try {
+    const d = await (await fetch('/api/detections')).json();
+    renderDetections(d.detections || []);
+  } catch(_){}
+}
+
+function renderDetections(dets) {
+  const list = document.getElementById('det-list');
+  const cnt  = document.getElementById('det-cnt');
+  const persons = dets.filter(d => d.category === 'person').length;
+  const others  = dets.filter(d => d.category !== 'person').length;
+  document.getElementById('s-persons').textContent = persons;
+  document.getElementById('s-objs').textContent    = others;
+
+  if (!dets.length) {
+    list.innerHTML = `<div class="empty"><div class="empty-icon">🔍</div>Sin objetos en frame</div>`;
+    cnt.textContent = '';
+    return;
+  }
+  cnt.textContent = `(${dets.length})`;
+  list.innerHTML  = dets.map(d => {
+    const cat  = d.category || 'object';
+    const name = d.name_es  || d.class_name;
+    const pct  = Math.round(d.confidence * 100);
+    return `<div class="det-item">
+      <div class="det-top">
+        <span class="det-name">${name}</span>
+        <span class="det-badge ${cat}">${CAT_LABEL[cat]||cat}</span>
+      </div>
+      <div class="conf-row">
+        <div class="conf-bar-w"><div class="conf-bar ${cat}" style="width:${pct}%"></div></div>
+        <span class="conf-lbl">${pct}%</span>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+// ── ANOMALIAS ─────────────────────────────────────────────────────────
+let prevAnomalyKey = '';
+async function pollAnomalies() {
+  try {
+    const d = await (await fetch('/api/anomalies')).json();
+    renderEPP(d.anomalies || []);
+    document.getElementById('s-alerts').textContent = (d.anomalies||[]).length;
+    if ((d.anomalies||[]).length > 0) showBanner(d.anomalies[0]);
+    else hideBanner();
+  } catch(_){}
+}
+
+function renderEPP(anomalies) {
+  const list = document.getElementById('epp-list');
+
+  // Agrupar violaciones por persona
+  const byPerson = {};
+  anomalies.forEach(a => {
+    const pid = a.person_id ?? 0;
+    if (!byPerson[pid]) byPerson[pid] = { viols: new Set(), oks: new Set() };
+    byPerson[pid].viols.add(a.label);
+  });
+
+  const personIds = Object.keys(byPerson);
+
+  if (!anomalies.length) {
+    // Sin violaciones — pero puede haber personas sin alertas
+    list.innerHTML = `<div class="empty"><div class="empty-icon">✅</div>EPP correcto en todos los detectados</div>`;
+    return;
+  }
+
+  let html = '';
+  for (const pid of personIds) {
+    const viols = byPerson[pid].viols;
+    html += `<div style="font-size:10px;font-weight:700;color:var(--muted);letter-spacing:.1em;text-transform:uppercase;margin-bottom:4px;margin-top:${pid>0?'10px':'0'}">Persona #${pid}</div>`;
+
+    // Items detectables por el modelo PPE
+    if (currentMode === 'ppe') {
+      for (const item of PPE_ITEMS_PPE_MODE) {
+        const missing = viols.has(item.key);
+        const cls     = missing ? 'danger' : 'ok';
+        const chip    = missing ? 'FALTA'  : 'OK';
+        html += `<div class="epp-item ${cls}">
+          <div class="epp-name">${item.label}</div>
+          <span class="epp-chip ${cls}">${chip}</span>
+        </div>`;
+      }
+      // Items no detectables (informativos)
+      for (const nd of PPE_NOT_DETECTABLE) {
+        html += `<div class="epp-item unknown">
+          <div class="epp-name">${nd}<small>No verificable con este modelo</small></div>
+          <span class="epp-chip unknown">N/D</span>
+        </div>`;
+      }
+    } else {
+      // Custom o COCO: mostrar solo las violaciones detectadas
+      for (const label of viols) {
+        html += `<div class="epp-item danger">
+          <div class="epp-name">${label}</div>
+          <span class="epp-chip danger">FALTA</span>
+        </div>`;
+      }
+    }
+  }
+  list.innerHTML = html;
+}
+
+// ── ALERT BANNER ──────────────────────────────────────────────────────
+let bannerT = null;
+function showBanner(a) {
+  const el  = document.getElementById('alert-banner');
+  const msg = a.message_es || a.label;
+  el.textContent = `⚠ ALERTA: ${msg.toUpperCase()}`;
+  el.classList.add('show');
+  clearTimeout(bannerT);
+  bannerT = setTimeout(hideBanner, 4000);
+}
+function hideBanner() {
+  document.getElementById('alert-banner').classList.remove('show');
+}
+
+// ── CONTROLES ─────────────────────────────────────────────────────────
+function snap() {
+  const img = document.getElementById('stream');
+  const c   = document.createElement('canvas');
+  c.width   = img.naturalWidth  || img.width;
+  c.height  = img.naturalHeight || img.height;
+  c.getContext('2d').drawImage(img, 0, 0);
+  const a   = document.createElement('a');
+  a.download = `biosec_${Date.now()}.jpg`;
+  a.href     = c.toDataURL('image/jpeg', .92);
+  a.click();
+}
+function fullscr() {
+  const el = document.getElementById('vp');
+  document.fullscreenElement ? document.exitFullscreen() : el.requestFullscreen();
+}
+
+// ── POLLING ───────────────────────────────────────────────────────────
+setInterval(pollStatus,     8000);
+setInterval(pollAnomalies,  1200);
+setInterval(pollDetections, 1000);
+pollStatus();
+pollAnomalies();
+pollDetections();
+</script>
+</body>
+</html>

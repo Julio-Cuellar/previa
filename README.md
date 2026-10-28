@@ -1,41 +1,98 @@
-# PREVIA (Fase 1 - Entregable Base)
+# PREVIA · Vigilante de Inocuidad BPM
 
-PREVIA es un ecosistema IoT predictivo y un dashboard reactivo diseñado para predecir y prevenir riesgos de infestación de plagas en establecimientos comerciales.
+![tests](https://github.com/Julio-Cuellar/previa/actions/workflows/tests.yml/badge.svg)
 
----
+Motor de visión por computadora que vigila en tiempo real si el personal de una cocina o planta de alimentos cumple las **Buenas Prácticas de Manufactura (BPM)**: cubrebocas, cofia, guantes y gafas, además de basura o derrames en zonas limpias. Toma el video de una webcam o cámara IP, detecta las faltas y las publica en un dashboard web y en una API JSON.
 
-## Estructura del Ecosistema
+> 📸 *Agrega aquí un GIF o captura de la detección en vivo.*
 
-El proyecto está estructurado de la siguiente forma:
+## El problema
 
-* **/backend**: Servidor FastAPI (Python 3.11) con motor de reglas y soporte para WebSockets en tiempo real.
-* **/frontend**: Aplicación en Angular 17 para el dashboard web reactivo y el mapa SVG interactivo.
-* **/n8n**: Configuración de flujos de automatización (Ingesta de sensores y Webhooks de alerta).
+En la industria alimentaria, una persona sin cubrebocas o sin cofia en la zona de producción es un riesgo de contaminación y una falta en auditorías sanitarias. Hoy eso se revisa a ojo y de forma esporádica. PREVIA lo hace de forma continua con la cámara que ya existe en el lugar.
 
----
+## Cómo funciona
 
-## Cómo Ejecutar el Proyecto
+```
+cámara (USB / RTSP)
+      │  reconexión automática, salto de frames
+      ▼
+detector YOLOv8 ──► asignación de EPP a cada persona (intersección / IoU)
+      │                         │
+      │                         ▼
+      │               reglas BPM por persona  +  zona limpia (ROI)
+      │                         │
+      │                         ▼
+      │               debounce: la falta debe persistir N frames
+      ▼                         ▼
+stream MJPEG anotado      anomalías validadas
+      └──────────── Flask: dashboard web + API JSON
+```
 
-Este proyecto está preparado para correr de forma local utilizando **Docker** y **Docker Compose**, lo que evita la necesidad de configurar Node.js, Python o Nginx localmente en tu sistema operativo.
+Decisiones de diseño:
 
-### Requisitos Previos
+- **El EPP se asigna a una persona, no se cuenta suelto.** Cada cubrebocas o cofia detectado se asocia a la persona con la que se solapa (proporción de contención o IoU). Si no hay detector de personas, el motor agrupa el EPP cercano en "personas virtuales".
+- **La ausencia de evidencia cuenta como falta.** Si a una persona no se le detecta cubrebocas, se reporta "sin cubrebocas" aunque el modelo no haya visto la clase negativa. Es la postura conservadora que exige una auditoría.
+- **Debounce contra falsos positivos.** Una alerta solo se dispara si la falta aparece en N frames seguidos (5 por defecto). Un frame limpio la reinicia. Esto elimina el parpadeo de alertas por detecciones aisladas.
+- **Zona limpia configurable.** Las faltas de higiene (basura, derrames) solo cuentan dentro de un polígono ROI que se actualiza en caliente desde la API, sin reiniciar el servicio.
+- **Degradación en cascada.** El motor elige el mejor modelo disponible y sigue funcionando si falta alguno:
 
-* Tener instalado [Docker](https://www.docker.com/) y que el daemon esté corriendo en tu sistema.
+  | Modo | Modelo | Qué detecta |
+  |---|---|---|
+  | `custom` | `best.pt` propio | Persona, cubrebocas, cofia (OK / falta), basura, derrames |
+  | `ppe` | YOLOv8 de EPP (Hugging Face) + YOLOv8n para personas | Cubrebocas, casco/cofia, guantes, gafas (OK / falta) |
+  | `coco` | YOLOv8n genérico | 80 clases COCO, sin reglas BPM |
+  | `demo` | ninguno | Solo el stream con un aviso |
 
-### Instrucciones de Inicio
+- **Operación sin supervisión.** Si la cámara se desconecta, el motor muestra un frame de aviso y se reconecta solo. El salto de frames (`frame_skip`) controla el costo de inferencia en CPU.
 
-1. Clona el repositorio y navega a la raíz del proyecto.
-2. Ejecuta el siguiente comando para compilar y levantar todos los servicios:
-   ```bash
-   docker compose up --build
-   ```
-3. Una vez finalice la construcción, los servicios estarán disponibles en los siguientes puertos:
-   * **Dashboard de Angular (Frontend):** `http://localhost:80`
-   * **Servidor FastAPI (Backend):** `http://localhost:8000` (documentación interactiva disponible en `http://localhost:8000/docs`)
-   * **n8n (Orquestador):** `http://localhost:5678`
+## Ejecutarlo
 
----
+Requiere Python 3.10+ y una cámara.
 
-## Desarrollo Paso a Paso
+```bash
+pip install -r requirements.txt
+python app.py
+```
 
-Las clases, componentes y flujos lógicos serán creados y detallados de forma incremental. El estado actual del proyecto contiene la configuración del entorno y los esqueletos iniciales de los componentes.
+Abre http://localhost:5000. Los pesos de YOLOv8n se descargan solos la primera vez. Si tienes un modelo entrenado con la taxonomía BPM, colócalo como `best.pt` en la raíz.
+
+Para elegir la cámara usa la variable `ENGINE_SOURCE`: `auto` (prueba los índices 0 a 5), un índice como `1`, o una URL `rtsp://...` de cámara IP.
+
+## API
+
+| Método | Ruta | Respuesta |
+|---|---|---|
+| `GET` | `/` | Dashboard web |
+| `GET` | `/video_feed` | Stream MJPEG con las detecciones dibujadas |
+| `GET` | `/api/anomalies` | Faltas validadas (ya pasaron el debounce) |
+| `GET` | `/api/detections` | Todas las detecciones del último frame |
+| `GET` | `/api/status` | Modo del modelo, estado de la cámara, configuración |
+| `POST` | `/api/roi` | Define la zona limpia: `{"polygon": [[x,y], ...]}` o `{"polygon": null}` para desactivarla |
+
+## Tests
+
+La lógica de decisión (geometría, debounce, ROI y reglas de EPP) se prueba sin cámara ni modelo:
+
+```bash
+pip install -r requirements-dev.txt
+pytest
+```
+
+Corren en GitHub Actions en cada push.
+
+## Estructura
+
+```
+├── app.py              Servidor Flask y API
+├── vision_engine.py    Motor: carga de modelos, captura, reglas BPM, anotación
+├── templates/
+│   └── index.html      Dashboard
+└── tests/              Pruebas de la lógica del motor
+```
+
+## Siguientes pasos
+
+- Medir precisión y recall por clase sobre un set de imágenes etiquetadas, y FPS en CPU.
+- Entrenar el modelo `custom` con imágenes de cocinas reales.
+- Enviar alertas a WhatsApp o correo cuando una falta persista.
+- Seguimiento de personas entre frames para no depender del índice de detección.
